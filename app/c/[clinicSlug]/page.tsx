@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import JoinQueueForm from "./JoinQueueForm";
 import Image from "next/image";
+import Link from "next/link";
 import { MapPin, Phone } from "lucide-react";
+import PageShell from "@/components/ui/PageShell";
 import type { Clinic } from "@/lib/supabase/types";
 
 interface PageProps {
@@ -26,17 +28,19 @@ export default async function ClinicLandingPage({ params }: PageProps) {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <PageShell>
       {/* Header */}
       <header className="flex items-center gap-3 px-md py-md border-b border-border">
-        <Image
-          src="/icon.png"
-          alt="ClinicOS"
-          width={32}
-          height={32}
-          className="rounded-lg"
-        />
-        <span className="text-sm font-semibold text-text-secondary">ClinicOS</span>
+        <Link href="/" className="flex items-center gap-3">
+          <Image
+            src="/icon.png"
+            alt="ClinicOS"
+            width={32}
+            height={32}
+            className="rounded-lg"
+          />
+          <span className="text-sm font-semibold text-text-secondary">ClinicOS</span>
+        </Link>
       </header>
 
       {/* Content */}
@@ -65,6 +69,6 @@ export default async function ClinicLandingPage({ params }: PageProps) {
         {/* Join queue form */}
         <JoinQueueForm clinicSlug={clinic.slug} clinicName={clinic.name} />
       </div>
-    </div>
+    </PageShell>
   );
 }

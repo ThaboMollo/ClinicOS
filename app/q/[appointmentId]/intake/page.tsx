@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
+import PageShell from "@/components/ui/PageShell";
 import { getAppointment, submitIntake } from "@/lib/api";
 import { loadSession } from "@/lib/session";
 import type { AppointmentView, ResolvedQuestion } from "@/lib/supabase/types";
@@ -103,15 +104,18 @@ export default function IntakeFormPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Spinner size={32} />
-      </div>
+      <PageShell>
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner size={32} />
+        </div>
+      </PageShell>
     );
   }
 
   if (submitted) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-md text-center gap-md">
+      <PageShell>
+        <div className="flex flex-col items-center justify-center flex-1 px-md text-center gap-md">
         <span className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/10">
           <CheckCircle2 size={32} className="text-accent" />
         </span>
@@ -120,12 +124,13 @@ export default function IntakeFormPage() {
         <Button variant="secondary" onClick={() => router.push(`/q/${appointmentId}`)}>
           Back to queue
         </Button>
-      </div>
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <PageShell>
       {/* Header */}
       <header className="flex items-center gap-3 px-md py-md border-b border-border">
         <button
@@ -171,7 +176,7 @@ export default function IntakeFormPage() {
           {submitting ? "Submitting…" : "Submit Intake"}
         </Button>
       </form>
-    </div>
+    </PageShell>
   );
 }
 

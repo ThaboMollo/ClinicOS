@@ -7,6 +7,7 @@ import { RefreshCw, WifiOff, ClipboardList, CheckCircle2, Stethoscope } from "lu
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
+import PageShell from "@/components/ui/PageShell";
 import { getAppointment } from "@/lib/api";
 import { loadSession } from "@/lib/session";
 import type { AppointmentView, AppointmentStatus } from "@/lib/supabase/types";
@@ -85,15 +86,18 @@ export default function QueueViewPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Spinner size={32} />
-      </div>
+      <PageShell>
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner size={32} />
+        </div>
+      </PageShell>
     );
   }
 
   if (!data) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-md text-center">
+      <PageShell>
+        <div className="flex flex-col items-center justify-center flex-1 px-md text-center">
         <WifiOff size={32} className="text-text-secondary mb-md" />
         <p className="text-text-primary font-semibold">Unable to load your queue position</p>
         <p className="text-text-secondary text-sm mt-sm">Check your connection and try again.</p>
@@ -105,7 +109,8 @@ export default function QueueViewPage() {
         >
           Try again
         </Button>
-      </div>
+        </div>
+      </PageShell>
     );
   }
 
@@ -114,7 +119,8 @@ export default function QueueViewPage() {
   const session = sessionRef.current!;
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <PageShell>
+      <div className="flex flex-col flex-1">
       {/* Offline banner */}
       {offline && (
         <div className="bg-warning/10 border-b border-warning/30 px-md py-2 flex items-center gap-2">
@@ -181,7 +187,8 @@ export default function QueueViewPage() {
           </p>
         )}
       </div>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
