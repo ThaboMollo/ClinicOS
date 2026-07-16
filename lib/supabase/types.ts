@@ -173,11 +173,13 @@ export interface AppointmentView {
   };
   position: number;
   estimated_wait_minutes: number;
+  estimated_wait_range: { min: number; max: number } | null;
   clinic: {
     name: string;
     address: string | null;
   };
   intake_submitted: boolean;
+  feedback_submitted: boolean;
   questions: ResolvedQuestion[];
 }
 
@@ -195,4 +197,11 @@ export interface PatientSession {
   appointmentId: string;
   accessToken: string;
   clinicSlug: string;
+}
+
+// Stored in localStorage separately from the session, so returning
+// patients get a prefilled join form after the visit is long gone
+export interface PatientInfo {
+  name: string;
+  phone: string;
 }

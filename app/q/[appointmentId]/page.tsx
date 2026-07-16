@@ -3,13 +3,18 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { RefreshCw, WifiOff, ClipboardList, CheckCircle2, Stethoscope } from "lucide-react";
+import { RefreshCw, WifiOff, ClipboardList, CheckCircle2, Stethoscope, Star } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import PageShell from "@/components/ui/PageShell";
-import { getAppointment } from "@/lib/api";
-import { loadSession } from "@/lib/session";
+import {
+  cancelAppointment,
+  getAppointment,
+  isSessionInvalidError,
+  submitFeedback,
+} from "@/lib/api";
+import { clearSession, loadSession } from "@/lib/session";
 import type { AppointmentView, AppointmentStatus } from "@/lib/supabase/types";
 
 const POLL_INTERVAL_MS = 7000;
@@ -24,6 +29,8 @@ export default function QueueViewPage() {
   const [offline, setOffline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   const sessionRef = useRef(loadSession());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -46,7 +53,13 @@ export default function QueueViewPage() {
         setData(result);
         setOffline(false);
         setLastUpdated(new Date());
-      } catch {
+      } catch (err) {
+        if (isSessionInvalidError(err)) {
+          // Appointment no longer exists or token is invalid — session is dead
+          clearSession();
+          router.push("/");
+          return;
+        }
         setOffline(true);
       } finally {
         setLoading(false);
@@ -114,9 +127,32 @@ export default function QueueViewPage() {
     );
   }
 
-  const { appointment, position, estimated_wait_minutes, clinic, intake_submitted } = data;
+  const {
+    appointment,
+    position,
+    estimated_wait_range,
+    clinic,
+    intake_submitted,
+    feedback_submitted,
+  } = data;
   const status = appointment.status as AppointmentStatus;
   const session = sessionRef.current!;
+
+  async function handleLeaveQueue() {
+    setLeaving(true);
+    try {
+      await cancelAppointment({
+        appointment_id: session.appointmentId,
+        access_token: session.accessToken,
+      });
+      clearSession();
+      router.push("/");
+    } catch {
+      setLeaving(false);
+      setConfirmLeave(false);
+      setOffline(true);
+    }
+  }
 
   return (
     <PageShell>
@@ -152,8 +188,17 @@ export default function QueueViewPage() {
         <StatusCard
           status={status}
           position={position}
-          estimatedWaitMinutes={estimated_wait_minutes}
+          estimatedWaitRange={estimated_wait_range}
         />
+
+        {/* Feedback prompt after the visit */}
+        {status === "done" && (
+          <FeedbackCard
+            appointmentId={session.appointmentId}
+            accessToken={session.accessToken}
+            alreadySubmitted={feedback_submitted}
+          />
+        )}
 
         {/* Intake prompt */}
         {status === "waiting" && !intake_submitted && (
@@ -186,6 +231,44 @@ export default function QueueViewPage() {
             Updated {formatRelativeTime(lastUpdated)}
           </p>
         )}
+
+        {/* Leave queue — quiet, but reachable */}
+        {status === "waiting" && (
+          <div className="mt-auto pt-md">
+            {!confirmLeave ? (
+              <button
+                onClick={() => setConfirmLeave(true)}
+                className="w-full text-center text-sm text-text-secondary hover:text-error transition-colors py-2"
+              >
+                Leave the queue
+              </button>
+            ) : (
+              <div className="rounded-2xl border border-error/20 bg-red-50/50 p-md flex flex-col gap-sm">
+                <p className="text-sm text-text-primary text-center">
+                  Leave the queue? You&apos;ll lose your place in line.
+                </p>
+                <div className="flex gap-sm">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => setConfirmLeave(false)}
+                    disabled={leaving}
+                  >
+                    Keep my place
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={handleLeaveQueue}
+                    loading={leaving}
+                  >
+                    Yes, leave
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </div>
     </PageShell>
@@ -198,10 +281,10 @@ export default function QueueViewPage() {
 interface StatusCardProps {
   status: AppointmentStatus;
   position: number;
-  estimatedWaitMinutes: number;
+  estimatedWaitRange: { min: number; max: number } | null;
 }
 
-function StatusCard({ status, position, estimatedWaitMinutes }: StatusCardProps) {
+function StatusCard({ status, position, estimatedWaitRange }: StatusCardProps) {
   if (status === "waiting") {
     return (
       <div className="rounded-2xl border border-border bg-surface p-lg text-center">
@@ -212,16 +295,18 @@ function StatusCard({ status, position, estimatedWaitMinutes }: StatusCardProps)
             {position === 1 ? "You're next in line" : `in line`}
           </p>
         </div>
-        {estimatedWaitMinutes > 0 && (
+        {estimatedWaitRange && (
           <div className="mt-lg border-t border-border pt-md">
             <p className="text-xs text-text-secondary uppercase tracking-wider">
               Estimated wait
             </p>
             <p className="text-xl font-semibold text-text-primary mt-xs">
-              ~{estimatedWaitMinutes} min
+              {estimatedWaitRange.min === estimatedWaitRange.max
+                ? `~${estimatedWaitRange.min} min`
+                : `~${estimatedWaitRange.min}–${estimatedWaitRange.max} min`}
             </p>
             <p className="text-xs text-text-secondary mt-xs">
-              This is an estimate only — actual times may vary
+              Based on today&apos;s pace at this clinic
             </p>
           </div>
         )}
@@ -275,6 +360,92 @@ function StatusCard({ status, position, estimatedWaitMinutes }: StatusCardProps)
   }
 
   return null;
+}
+
+// ─────────────────────────────────────────
+// Post-visit feedback (§4.1)
+// ─────────────────────────────────────────
+interface FeedbackCardProps {
+  appointmentId: string;
+  accessToken: string;
+  alreadySubmitted: boolean;
+}
+
+function FeedbackCard({ appointmentId, accessToken, alreadySubmitted }: FeedbackCardProps) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(alreadySubmitted);
+  const [error, setError] = useState<string | null>(null);
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-emerald-50/40 p-md">
+        <CheckCircle2 size={20} className="text-accent shrink-0" />
+        <p className="text-sm text-accent-dark font-medium">Thank you for your feedback</p>
+      </div>
+    );
+  }
+
+  async function handleSubmit() {
+    if (rating === 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await submitFeedback({
+        appointment_id: appointmentId,
+        access_token: accessToken,
+        rating,
+        comment: comment.trim() || undefined,
+      });
+      setSubmitted(true);
+    } catch {
+      setError("Couldn't send your feedback. Please try again.");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-md flex flex-col gap-md">
+      <p className="text-sm font-medium text-text-primary text-center">
+        How was your visit today?
+      </p>
+      <div className="flex justify-center gap-2">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            onClick={() => setRating(star)}
+            aria-label={`${star} star${star > 1 ? "s" : ""}`}
+            className="p-1.5 transition-transform active:scale-90"
+          >
+            <Star
+              size={30}
+              className={
+                star <= rating ? "fill-amber-400 text-amber-400" : "text-border"
+              }
+            />
+          </button>
+        ))}
+      </div>
+      {rating > 0 && (
+        <>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Anything you'd like the clinic to know? (optional)"
+            rows={2}
+            maxLength={1000}
+            className="w-full rounded-[12px] border border-border bg-surface px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none"
+          />
+          {error && <p className="text-xs text-error text-center">{error}</p>}
+          <Button onClick={handleSubmit} loading={submitting} className="w-full">
+            {submitting ? "Sending…" : "Send feedback"}
+          </Button>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────

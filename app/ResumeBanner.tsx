@@ -3,14 +3,31 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Clock, ChevronRight } from "lucide-react";
-import { loadSession } from "@/lib/session";
+import { getAppointment, isSessionInvalidError } from "@/lib/api";
+import { clearSession, loadSession } from "@/lib/session";
 import type { PatientSession } from "@/lib/supabase/types";
 
 export default function ResumeBanner() {
   const [session, setSession] = useState<PatientSession | null>(null);
 
   useEffect(() => {
-    setSession(loadSession());
+    const stored = loadSession();
+    if (!stored) return;
+
+    // Only show the banner for visits that are still active on the server
+    getAppointment({
+      appointment_id: stored.appointmentId,
+      access_token: stored.accessToken,
+    })
+      .then((data) => {
+        const status = data.appointment.status;
+        if (status === "waiting" || status === "in_consultation") {
+          setSession(stored);
+        }
+      })
+      .catch((err) => {
+        if (isSessionInvalidError(err)) clearSession();
+      });
   }, []);
 
   if (!session) return null;

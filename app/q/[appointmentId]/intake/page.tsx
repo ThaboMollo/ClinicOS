@@ -6,8 +6,8 @@ import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import PageShell from "@/components/ui/PageShell";
-import { getAppointment, submitIntake } from "@/lib/api";
-import { loadSession } from "@/lib/session";
+import { getAppointment, isSessionInvalidError, submitIntake } from "@/lib/api";
+import { clearSession, loadSession } from "@/lib/session";
 import type { AppointmentView, ResolvedQuestion } from "@/lib/supabase/types";
 
 export default function IntakeFormPage() {
@@ -42,9 +42,24 @@ export default function IntakeFormPage() {
         if (data.intake_submitted) {
           setSubmitted(true);
         }
+        // Sliders render at 5 by default, so make that the recorded answer too
+        setAnswers((prev) => {
+          const next = { ...prev };
+          for (const q of data.questions) {
+            if (q.question_type === "scale" && !next[q.id]) next[q.id] = "5";
+          }
+          return next;
+        });
         setView(data);
       })
-      .catch(() => setGeneralError("Unable to load intake form. Please try again."))
+      .catch((err) => {
+        if (isSessionInvalidError(err)) {
+          clearSession();
+          router.push("/");
+          return;
+        }
+        setGeneralError("Unable to load intake form. Please try again.");
+      })
       .finally(() => setLoading(false));
   }, [appointmentId, router]);
 

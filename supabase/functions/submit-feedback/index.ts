@@ -6,13 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-interface AnswerPayload {
-  question_id: string;
-  question_key: string;
-  question_text: string;
-  answer: string;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -33,7 +26,8 @@ Deno.serve(async (req) => {
   let body: {
     appointment_id?: string;
     access_token?: string;
-    answers?: AnswerPayload[];
+    rating?: number;
+    comment?: string;
   };
   try {
     body = await req.json();
@@ -44,19 +38,26 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { appointment_id, access_token, answers } = body;
+  const { appointment_id, access_token, rating, comment } = body;
 
-  if (!appointment_id || !access_token || !answers?.length) {
+  if (!appointment_id || !access_token || typeof rating !== "number") {
     return new Response(
-      JSON.stringify({ error: "appointment_id, access_token, and answers are required" }),
+      JSON.stringify({ error: "appointment_id, access_token, and rating are required" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return new Response(JSON.stringify({ error: "rating must be an integer from 1 to 5" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   // 1. Verify appointment + token
   const { data: appointment, error: apptError } = await supabase
     .from("appointments")
-    .select("id, clinic_id, access_token, status, appointment_date")
+    .select("id, clinic_id, access_token, status")
     .eq("id", appointment_id)
     .single();
 
@@ -74,63 +75,43 @@ Deno.serve(async (req) => {
     });
   }
 
-  // 1b. Expire tokens after the day following the appointment (§6.2)
-  const apptDateMs = new Date(`${appointment.appointment_date}T00:00:00Z`).getTime();
-  if (Date.now() - apptDateMs > 2 * 24 * 60 * 60 * 1000) {
-    return new Response(JSON.stringify({ error: "Session expired" }), {
-      status: 403,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  // 2. Guard: only allow while active
-  if (!["waiting", "in_consultation"].includes(appointment.status)) {
+  // 2. Feedback only makes sense after the visit
+  if (appointment.status !== "done") {
     return new Response(
-      JSON.stringify({ error: "Intake can only be submitted for active appointments" }),
+      JSON.stringify({ error: "Feedback can only be submitted after the visit is complete" }),
       { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 
-  // 3. Guard: prevent duplicate submissions
-  const { count } = await supabase
-    .from("intake_responses")
-    .select("*", { count: "exact", head: true })
-    .eq("appointment_id", appointment_id);
-
-  if ((count ?? 0) > 0) {
-    return new Response(
-      JSON.stringify({ error: "Intake already submitted for this appointment" }),
-      { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  // 4. Insert all responses
-  const rows = answers.map((a) => ({
+  // 3. Insert — the UNIQUE constraint on appointment_id is the duplicate guard
+  const { error: insertError } = await supabase.from("visit_feedback").insert({
     appointment_id,
     clinic_id: appointment.clinic_id,
-    question_id: a.question_id || null,
-    question_key: a.question_key,
-    question_text: a.question_text,
-    answer: String(a.answer),
-  }));
-
-  const { error: insertError } = await supabase
-    .from("intake_responses")
-    .insert(rows);
+    rating,
+    comment: comment?.trim() ? comment.trim().slice(0, 1000) : null,
+  });
 
   if (insertError) {
-    return new Response(JSON.stringify({ error: "Failed to save intake responses" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const duplicate = insertError.code === "23505";
+    return new Response(
+      JSON.stringify({
+        error: duplicate
+          ? "Feedback already submitted for this visit"
+          : "Failed to save feedback",
+      }),
+      {
+        status: duplicate ? 409 : 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 
-  // 5. Log the event
   await supabase.from("appointment_events").insert({
     clinic_id: appointment.clinic_id,
     appointment_id,
     actor_type: "patient",
-    event_type: "intake_submitted",
+    event_type: "feedback_submitted",
+    metadata: { rating },
   });
 
   return new Response(JSON.stringify({ success: true }), {

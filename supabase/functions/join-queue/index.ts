@@ -33,9 +33,11 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { clinic_slug, name, phone } = body;
+  const { clinic_slug, name } = body;
+  // Normalize so "082 123 4567" and "0821234567" match the same patient
+  const phone = body.phone?.replace(/[^\d+]/g, "");
 
-  if (!clinic_slug || !name || !phone) {
+  if (!clinic_slug || !name?.trim() || !phone) {
     return new Response(
       JSON.stringify({ error: "clinic_slug, name, and phone are required" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -54,6 +56,25 @@ Deno.serve(async (req) => {
       status: 404,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  // 1b. Per-IP rate limit: 20 joins/hour, counted from queue_joined events (§6.1)
+  const clientIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+  const { count: ipJoins } = await supabase
+    .from("appointment_events")
+    .select("*", { count: "exact", head: true })
+    .eq("event_type", "queue_joined")
+    .eq("metadata->>ip", clientIp)
+    .gt("created_at", oneHourAgo);
+
+  if ((ipJoins ?? 0) >= 20) {
+    return new Response(
+      JSON.stringify({ error: "Too many requests. Please try again later." }),
+      { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   // 2. Find or create patient by (clinic_id, phone)
@@ -75,7 +96,7 @@ Deno.serve(async (req) => {
   } else {
     const { data: newPatient, error: createPatientError } = await supabase
       .from("patients")
-      .insert({ clinic_id: clinic.id, name: name.trim(), phone: phone.trim() })
+      .insert({ clinic_id: clinic.id, name: name.trim(), phone })
       .select("id")
       .single();
 
@@ -105,13 +126,30 @@ Deno.serve(async (req) => {
   let appointmentId: string;
   let accessToken: string;
   let isReconnect: boolean;
+  let enteredQueueAt: string;
 
   if (activeAppointment) {
     // Reconnect to existing appointment
     appointmentId = activeAppointment.id;
     accessToken = activeAppointment.access_token;
+    enteredQueueAt = activeAppointment.entered_queue_at;
     isReconnect = true;
   } else {
+    // Per-phone rate limit: 3 new appointments/hour (§6.1) — reconnects above
+    // never reach this, so a patient re-scanning the QR is unaffected
+    const { count: recentJoins } = await supabase
+      .from("appointments")
+      .select("*", { count: "exact", head: true })
+      .eq("patient_id", patientId)
+      .gt("created_at", oneHourAgo);
+
+    if ((recentJoins ?? 0) >= 3) {
+      return new Response(
+        JSON.stringify({ error: "Too many attempts with this phone number. Please try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Create a fresh appointment (previous one was done/cancelled or none existed)
     const { data: newAppointment, error: apptError } = await supabase
       .from("appointments")
@@ -122,7 +160,7 @@ Deno.serve(async (req) => {
         appointment_date: today,
         entered_queue_at: new Date().toISOString(),
       })
-      .select("id, access_token")
+      .select("id, access_token, entered_queue_at")
       .single();
 
     if (apptError || !newAppointment) {
@@ -133,15 +171,17 @@ Deno.serve(async (req) => {
     }
     appointmentId = newAppointment.id;
     accessToken = newAppointment.access_token;
+    enteredQueueAt = newAppointment.entered_queue_at;
     isReconnect = false;
 
-    // Log the event
+    // Log the event; the ip in metadata feeds the per-IP rate limit
     await supabase.from("appointment_events").insert({
       clinic_id: clinic.id,
       appointment_id: appointmentId,
       actor_type: "patient",
       event_type: "queue_joined",
       to_status: "waiting",
+      metadata: { ip: clientIp },
     });
   }
 
@@ -152,12 +192,7 @@ Deno.serve(async (req) => {
     .eq("clinic_id", clinic.id)
     .eq("appointment_date", today)
     .eq("status", "waiting")
-    .lt(
-      "entered_queue_at",
-      activeAppointment
-        ? activeAppointment.entered_queue_at
-        : new Date().toISOString()
-    );
+    .lt("entered_queue_at", enteredQueueAt);
 
   const position = (count ?? 0) + 1;
 

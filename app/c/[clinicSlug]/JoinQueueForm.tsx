@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import { joinQueue } from "@/lib/api";
-import { saveSession } from "@/lib/session";
+import {
+  saveSession,
+  savePatientInfo,
+  loadPatientInfo,
+  clearPatientInfo,
+} from "@/lib/session";
 import { Users } from "lucide-react";
 
 interface JoinQueueFormProps {
@@ -32,6 +37,24 @@ export default function JoinQueueForm({ clinicSlug, clinicName }: JoinQueueFormP
   const [phone, setPhone] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [loading, setLoading] = useState(false);
+  const [prefilled, setPrefilled] = useState(false);
+
+  // Welcome back — returning patients shouldn't retype their details
+  useEffect(() => {
+    const saved = loadPatientInfo();
+    if (saved) {
+      setName(saved.name);
+      setPhone(saved.phone);
+      setPrefilled(true);
+    }
+  }, []);
+
+  function handleClearSaved() {
+    clearPatientInfo();
+    setName("");
+    setPhone("");
+    setPrefilled(false);
+  }
 
   function validate(): boolean {
     const errs: FormErrors = {};
@@ -64,6 +87,7 @@ export default function JoinQueueForm({ clinicSlug, clinicName }: JoinQueueFormP
         accessToken: result.access_token,
         clinicSlug,
       });
+      savePatientInfo({ name: name.trim(), phone: phone.trim() });
 
       router.push(`/q/${result.appointment_id}`);
     } catch (err) {
@@ -93,6 +117,19 @@ export default function JoinQueueForm({ clinicSlug, clinicName }: JoinQueueFormP
           <h2 className="text-lg font-semibold text-text-primary mb-md">
             Join the queue at {clinicName}
           </h2>
+
+          {prefilled && (
+            <p className="text-sm text-text-secondary mb-md -mt-2">
+              Welcome back — we&apos;ve filled in your details.{" "}
+              <button
+                type="button"
+                onClick={handleClearSaved}
+                className="font-medium text-primary hover:underline"
+              >
+                Not you?
+              </button>
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-md" noValidate>
             <Input

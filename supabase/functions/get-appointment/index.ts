@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Tokens are valid on the appointment day and the following day (§6.2)
+const TOKEN_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -78,6 +81,15 @@ Deno.serve(async (req) => {
     });
   }
 
+  // 2b. Expire tokens after the day following the appointment (§6.2)
+  const apptDateMs = new Date(`${appointment.appointment_date}T00:00:00Z`).getTime();
+  if (Date.now() - apptDateMs > TOKEN_MAX_AGE_MS) {
+    return new Response(JSON.stringify({ error: "Session expired" }), {
+      status: 403,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const clinic = appointment.clinics as {
     name: string;
     address: string | null;
@@ -98,8 +110,44 @@ Deno.serve(async (req) => {
     position = (count ?? 0) + 1;
   }
 
-  const estimatedWaitMinutes =
-    position > 1 ? clinic.avg_consultation_minutes * (position - 1) : 0;
+  // 3b. Wait estimate from today's actual throughput (§3.2):
+  // average start-to-start interval of recent consultations, falling back to
+  // the clinic's configured constant when there aren't enough samples yet.
+  let intervalMinutes = clinic.avg_consultation_minutes;
+  if (position > 1) {
+    const { data: recentStarts } = await supabase
+      .from("appointments")
+      .select("consultation_started_at")
+      .eq("clinic_id", appointment.clinic_id)
+      .eq("appointment_date", appointment.appointment_date)
+      .not("consultation_started_at", "is", null)
+      .order("consultation_started_at", { ascending: false })
+      .limit(6);
+
+    const starts = (recentStarts ?? [])
+      .map((r) => new Date(r.consultation_started_at as string).getTime())
+      .sort((a, b) => a - b);
+
+    const intervals: number[] = [];
+    for (let i = 1; i < starts.length; i++) {
+      const mins = (starts[i] - starts[i - 1]) / 60000;
+      // Ignore breaks (lunch, doctor stepping out) that would skew the pace
+      if (mins > 0 && mins <= 120) intervals.push(mins);
+    }
+
+    if (intervals.length >= 3) {
+      intervalMinutes = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    }
+  }
+
+  const rawWait = position > 1 ? intervalMinutes * (position - 1) : 0;
+  const roundTo5 = (n: number) => Math.max(5, Math.round(n / 5) * 5);
+  const estimatedWaitMinutes = Math.round(rawWait);
+  // A range is honest; a point estimate is a promise we can't keep
+  const estimatedWaitRange =
+    rawWait > 0
+      ? { min: roundTo5(rawWait * 0.8), max: roundTo5(rawWait * 1.4) }
+      : null;
 
   // 4. Check if intake already submitted
   const { count: intakeCount } = await supabase
@@ -108,6 +156,16 @@ Deno.serve(async (req) => {
     .eq("appointment_id", appointment_id);
 
   const intakeSubmitted = (intakeCount ?? 0) > 0;
+
+  // 4b. Check if feedback already submitted (only relevant once done)
+  let feedbackSubmitted = false;
+  if (appointment.status === "done") {
+    const { count: feedbackCount } = await supabase
+      .from("visit_feedback")
+      .select("*", { count: "exact", head: true })
+      .eq("appointment_id", appointment_id);
+    feedbackSubmitted = (feedbackCount ?? 0) > 0;
+  }
 
   // 5. Fetch clinic's active intake questions (resolved with templates)
   const { data: clinicQuestions } = await supabase
@@ -170,11 +228,13 @@ Deno.serve(async (req) => {
       },
       position,
       estimated_wait_minutes: estimatedWaitMinutes,
+      estimated_wait_range: estimatedWaitRange,
       clinic: {
         name: clinic.name,
         address: clinic.address,
       },
       intake_submitted: intakeSubmitted,
+      feedback_submitted: feedbackSubmitted,
       questions,
     }),
     {
