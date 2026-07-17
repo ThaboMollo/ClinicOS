@@ -6,11 +6,12 @@ Patients scan a QR code (or open a link) at the clinic, enter their name and pho
 
 ## What it does
 
-- **Browse clinics** — the home page (`/`) lists every clinic on the platform so patients can find their facility and join its queue directly.
+- **Marketing site** — the home page (`/`) pitches ClinicOS to practices, with tailored landing pages for dentists (`/for/dentists`), GPs (`/for/gps`) and clinics (`/for/clinics`).
+- **Browse clinics** — `/find-a-clinic` lists every clinic on the platform so patients can find their facility and join its queue directly.
 - **Join a queue** — each clinic has its own landing page (`/c/[clinicSlug]`) with a simple name + phone form. If the patient already has an active appointment today, they are reconnected to it instead of creating a duplicate.
 - **Live queue position** (`/q/[appointmentId]`) — shows "You are #3 in line", the appointment status (Waiting → In consultation → Done), and an estimated wait time. Updates by polling every 7 seconds, with offline detection and manual refresh.
 - **Quick intake** (`/q/[appointmentId]/intake`) — 3–6 clinic-configurable questions (text, dropdown, 0–10 scale, yes/no) submitted before the consultation.
-- **Session persistence** — the appointment ID and access token are stored in `localStorage`, so patients can close the browser and return to their place in the queue. The home page shows a "You have an active visit" banner when a session exists.
+- **Session persistence** — the appointment ID and access token are stored in `localStorage`, so patients can close the browser and return to their place in the queue. The clinic directory shows a "You have an active visit" banner when a session exists.
 
 Deliberately **not** included (MVP scope): payments, video calls, prescriptions, medical records, or any account system. Staff-facing queue management and QR code generation live in a separate admin portal.
 
@@ -28,11 +29,14 @@ Deliberately **not** included (MVP scope): payments, video calls, prescriptions,
 
 ```
 app/
-  page.tsx                     # Home — clinic directory + resume-visit banner
+  page.tsx                     # Home — marketing landing for practices
+  for/{dentists,gps,clinics}/  # Segment landing pages (marketing)
+  find-a-clinic/               # Clinic directory + resume-visit banner
   c/[clinicSlug]/              # Clinic landing + join queue form
   q/[appointmentId]/           # Live queue position (polls every 7s)
   q/[appointmentId]/intake/    # Intake questionnaire
 components/ui/                 # Button, Card, Input, Badge, Spinner, Toast, PageShell
+components/marketing/          # Nav, footer, hero, segment template, FAQ, CTA
 lib/
   api.ts                       # Edge Function client
   session.ts                   # localStorage session helpers

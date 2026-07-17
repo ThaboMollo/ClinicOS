@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ClinicOS — Patient Queue",
-  description: "Join your clinic's queue and track your position in real time.",
+  title: {
+    default: "ClinicOS — The waiting room, without the waiting",
+    template: "%s · ClinicOS",
+  },
+  description:
+    "ClinicOS puts your walk-in queue on every patient's phone — no app, no account. Built for dentists, GPs and clinics.",
   icons: {
     icon: "/icon.png",
   },
