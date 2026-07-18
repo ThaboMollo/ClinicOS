@@ -34,7 +34,7 @@ export default function CTASection({ title, body, mailSubject = "ClinicOS demo r
 
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <a
-            href={`mailto:hello@clinicos.co.za?subject=${encodeURIComponent(mailSubject)}`}
+            href={`mailto:hello@clinic.co.za?subject=${encodeURIComponent(mailSubject)}`}
             className="inline-flex h-12 items-center gap-2 rounded-xl bg-white px-7 text-base font-semibold text-primary-dark transition-colors hover:bg-blue-50"
           >
             Book a free demo
