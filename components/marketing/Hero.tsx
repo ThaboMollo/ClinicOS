@@ -63,7 +63,7 @@ export default function Hero({
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <a
-              href={`mailto:hello@clinic.co.za?subject=${encodeURIComponent(mailSubject)}`}
+              href={`mailto:hello@clinicos.co.za?subject=${encodeURIComponent(mailSubject)}`}
               className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-7 text-base font-semibold text-white transition-colors hover:bg-primary-dark"
             >
               Book a free demo

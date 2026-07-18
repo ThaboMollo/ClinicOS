@@ -47,7 +47,7 @@ export default function SiteFooter() {
             ))}
             <li>
               <a
-                href="mailto:hello@clinic.co.za?subject=ClinicOS%20demo%20request"
+                href="mailto:hello@clinicos.co.za?subject=ClinicOS%20demo%20request"
                 className="text-sm text-text-secondary transition-colors hover:text-primary"
               >
                 Book a demo
