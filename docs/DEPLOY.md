@@ -16,7 +16,14 @@ reconnected, Vercel will deploy every push on its own and bypass the gates.
 |------|-----|--------------------|------|
 | DEV  | https://clinic-os-dev.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with UAT) | none — deploys on every push to main |
 | UAT  | https://clinic-os-uat.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with DEV) | required reviewer on the `uat` environment |
-| PROD | https://clinic-os-ui.vercel.app | dedicated prod project | required reviewer on the `production` environment |
+| PROD | https://clinic-os-ui.vercel.app | `qxtanjxyjagbzaaxqylu` ⚠ temporary — see below | required reviewer on the `production` environment |
+
+> ⚠ **Deferred PROD split (2026-07-20):** PROD currently shares the Supabase
+> project with DEV/UAT because the free tier's 2-active-project limit is
+> reached. Before onboarding real clinics: upgrade the Supabase org (or free
+> a slot), create `clinicos-prod`, apply `supabase/migrations/`, deploy the
+> five edge functions with `--no-verify-jwt`, and update the `production`
+> environment values in GitHub — nothing else in the pipeline changes.
 
 - **UAT is not a rebuild.** Approving the UAT gate re-aliases the exact DEV
   deployment, so UAT signs off on the byte-identical artifact.
