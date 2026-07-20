@@ -32,12 +32,12 @@ export default function QueueViewPage() {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const sessionRef = useRef(loadSession());
+  // Lazy init: read once on mount; null during SSR (loadSession guards on window)
+  const [session] = useState(loadSession);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(
     async (isManual = false) => {
-      const session = sessionRef.current;
       if (!session || session.appointmentId !== appointmentId) {
         router.push("/");
         return;
@@ -66,26 +66,24 @@ export default function QueueViewPage() {
         if (isManual) setRefreshing(false);
       }
     },
-    [appointmentId, router]
+    [appointmentId, router, session]
   );
 
   useEffect(() => {
-    // Validate session first
-    const session = loadSession();
-    sessionRef.current = session;
-
     if (!session || session.appointmentId !== appointmentId) {
       router.push("/");
       return;
     }
 
+    // Fetch-on-mount: state updates land after the network await, not synchronously
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     pollRef.current = setInterval(() => fetchData(), POLL_INTERVAL_MS);
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [appointmentId, fetchData, router]);
+  }, [appointmentId, fetchData, router, session]);
 
   // Stop polling when terminal status reached
   useEffect(() => {
@@ -107,7 +105,7 @@ export default function QueueViewPage() {
     );
   }
 
-  if (!data) {
+  if (!data || !session) {
     return (
       <PageShell>
         <div className="flex flex-col items-center justify-center flex-1 px-md text-center">
@@ -136,9 +134,9 @@ export default function QueueViewPage() {
     feedback_submitted,
   } = data;
   const status = appointment.status as AppointmentStatus;
-  const session = sessionRef.current!;
 
   async function handleLeaveQueue() {
+    if (!session) return;
     setLeaving(true);
     try {
       await cancelAppointment({
