@@ -14,8 +14,8 @@ reconnected, Vercel will deploy every push on its own and bypass the gates.
 
 | Env  | URL | Backend (Supabase) | Gate |
 |------|-----|--------------------|------|
-| DEV  | https://clinic-os-dev.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with UAT) | none — deploys on every push to main |
-| UAT  | https://clinic-os-uat.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with DEV) | required reviewer on the `uat` environment |
+| DEV  | https://clinic-os-ui-dev.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with UAT) | none — deploys on every push to main |
+| UAT  | https://clinic-os-ui-uat.vercel.app | `qxtanjxyjagbzaaxqylu` (shared with DEV) | required reviewer on the `uat` environment |
 | PROD | https://clinic-os-ui.vercel.app | `qxtanjxyjagbzaaxqylu` ⚠ temporary — see below | required reviewer on the `production` environment |
 
 > ⚠ **Deferred PROD split (2026-07-20):** PROD currently shares the Supabase
@@ -50,14 +50,14 @@ pipeline; DEV keeps the new build, UAT/PROD keep the old one.
   pipeline run again, or re-run the last good Deploy workflow from the Actions
   tab (gates are re-approved).
 - **DEV/UAT:** re-point the alias at any older deployment:
-  `vercel alias set <older-deployment-url> clinic-os-uat.vercel.app --scope=thabomollos-projects`.
+  `vercel alias set <older-deployment-url> clinic-os-ui-uat.vercel.app --scope=thabomollos-projects`.
 
 ## Smoke test
 
 `scripts/smoke.mjs` runs against the DEV alias after every DEV deploy
 (read-only: marketing home renders, `/find-a-clinic` lists the demo clinic,
 `/c/demo-clinic` shows the join form, zero console errors). Run it against
-any URL locally: `npm run smoke -- https://clinic-os-dev.vercel.app`.
+any URL locally: `npm run smoke -- https://clinic-os-ui-dev.vercel.app`.
 
 ## Upgrade path (Vercel Pro)
 

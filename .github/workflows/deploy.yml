@@ -23,8 +23,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEV_ALIAS: clinic-os-dev.vercel.app
-  UAT_ALIAS: clinic-os-uat.vercel.app
+  DEV_ALIAS: clinic-os-ui-dev.vercel.app
+  UAT_ALIAS: clinic-os-ui-uat.vercel.app
   VERCEL_SCOPE: thabomollos-projects
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
-      url: https://clinic-os-dev.vercel.app
+      url: https://clinic-os-ui-dev.vercel.app
     outputs:
       deployment-url: ${{ steps.deploy.outputs.url }}
     env:
@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: uat
-      url: https://clinic-os-uat.vercel.app
+      url: https://clinic-os-ui-uat.vercel.app
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
