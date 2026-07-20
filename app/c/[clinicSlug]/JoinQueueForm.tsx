@@ -39,10 +39,12 @@ export default function JoinQueueForm({ clinicSlug, clinicName }: JoinQueueFormP
   const [loading, setLoading] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
 
-  // Welcome back — returning patients shouldn't retype their details
+  // Welcome back — returning patients shouldn't retype their details.
+  // localStorage must be read after hydration, so an effect is the right home.
   useEffect(() => {
     const saved = loadPatientInfo();
     if (saved) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setName(saved.name);
       setPhone(saved.phone);
       setPrefilled(true);
