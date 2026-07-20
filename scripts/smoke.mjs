@@ -27,9 +27,12 @@ try {
   // Marketing home
   const home = await page.goto(`${base}/`, { waitUntil: "networkidle", timeout: 30000 });
   check("home responds 200", home.status() === 200);
+  // Catch Vercel Deployment Protection: an SSO redirect lands off-host and
+  // would otherwise false-positive every "responds 200" check
+  check("no auth-wall redirect (still on target host)", page.url().startsWith(base));
   check(
     "home renders marketing hero",
-    await page.getByRole("heading", { level: 1 }).first().isVisible()
+    await page.getByText("waiting room, without the waiting", { exact: false }).first().isVisible().catch(() => false)
   );
 
   // Clinic directory
