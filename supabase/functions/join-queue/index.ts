@@ -6,6 +6,71 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+type IdType = "rsa_id" | "passport" | "asylum";
+
+// ── Identity validation (mirrors lib/identity.ts; kept inline because Edge
+//    Functions run on Deno and don't share the app's module graph). ──────
+function isValidLuhn(digits: string): boolean {
+  if (!/^\d+$/.test(digits)) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (double) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
+/** ISO 'YYYY-MM-DD' from an RSA ID's YYMMDD prefix, or null if invalid. */
+function deriveRsaDob(id: string): string | null {
+  const yy = Number(id.slice(0, 2));
+  const mm = Number(id.slice(2, 4));
+  const dd = Number(id.slice(4, 6));
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const now = new Date();
+  const century = yy <= now.getUTCFullYear() % 100 ? 2000 : 1900;
+  const year = century + yy;
+  const d = new Date(Date.UTC(year, mm - 1, dd));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== mm - 1 || d.getUTCDate() !== dd) {
+    return null;
+  }
+  if (d.getTime() > now.getTime()) return null;
+  return `${year}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
+/** Returns { ok, dob } or { ok:false, error }. Server is authoritative. */
+function validateIdentity(
+  idType: IdType,
+  idNumber: string,
+  nationality: string
+): { ok: true; dob: string | null } | { ok: false; error: string } {
+  if (idType === "rsa_id") {
+    const clean = idNumber.replace(/\s/g, "");
+    if (!/^\d{13}$/.test(clean)) {
+      return { ok: false, error: "A South African ID number must be 13 digits." };
+    }
+    if (!isValidLuhn(clean)) {
+      return { ok: false, error: "The ID number's checksum is invalid." };
+    }
+    const dob = deriveRsaDob(clean);
+    if (!dob) return { ok: false, error: "The ID number's date of birth is invalid." };
+    return { ok: true, dob };
+  }
+  if (!nationality.trim()) {
+    return { ok: false, error: "Nationality is required for a passport or asylum number." };
+  }
+  const normalized = idNumber.replace(/[\s-]/g, "");
+  if (!/^[A-Za-z0-9]{5,20}$/.test(normalized)) {
+    return { ok: false, error: "Enter a valid passport or asylum/permit number." };
+  }
+  return { ok: true, dob: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -23,7 +88,15 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
-  let body: { clinic_slug?: string; name?: string; phone?: string };
+  let body: {
+    clinic_slug?: string;
+    name?: string;
+    phone?: string;
+    nationality?: string;
+    id_type?: string;
+    id_number?: string;
+    consent_records_storage?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -36,6 +109,9 @@ Deno.serve(async (req) => {
   const { clinic_slug, name } = body;
   // Normalize so "082 123 4567" and "0821234567" match the same patient
   const phone = body.phone?.replace(/[^\d+]/g, "");
+  const nationality = (body.nationality ?? "").trim();
+  const idType = body.id_type as IdType | undefined;
+  const idNumber = (body.id_number ?? "").trim();
 
   if (!clinic_slug || !name?.trim() || !phone) {
     return new Response(
@@ -43,6 +119,22 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+
+  if (!idType || !["rsa_id", "passport", "asylum"].includes(idType) || !idNumber) {
+    return new Response(
+      JSON.stringify({ error: "A valid ID type and number are required" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const identity = validateIdentity(idType, idNumber, nationality);
+  if (!identity.ok) {
+    return new Response(JSON.stringify({ error: identity.error }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const derivedDob = identity.dob;
 
   // 1. Look up clinic by slug
   const { data: clinic, error: clinicError } = await supabase
@@ -77,26 +169,44 @@ Deno.serve(async (req) => {
     );
   }
 
-  // 2. Find or create patient by (clinic_id, phone)
+  // 2. Find-or-create patient — dedupe on ID number first, then phone.
+  //    Identity fields are (re)persisted from the authoritative server values.
+  const identityFields: Record<string, string> = {
+    name: name.trim(),
+    phone,
+    nationality,
+    id_type: idType,
+    id_number: idNumber,
+  };
+  if (derivedDob) identityFields.dob = derivedDob; // don't wipe an existing dob with null
+
   let patientId: string;
-  const { data: existingPatient } = await supabase
+  const { data: byId } = await supabase
     .from("patients")
     .select("id")
     .eq("clinic_id", clinic.id)
-    .eq("phone", phone)
-    .single();
+    .eq("id_type", idType)
+    .eq("id_number", idNumber)
+    .maybeSingle();
 
-  if (existingPatient) {
-    patientId = existingPatient.id;
-    // Update name in case it changed
-    await supabase
+  let existing = byId;
+  if (!existing) {
+    const { data: byPhone } = await supabase
       .from("patients")
-      .update({ name: name.trim() })
-      .eq("id", patientId);
+      .select("id")
+      .eq("clinic_id", clinic.id)
+      .eq("phone", phone)
+      .maybeSingle();
+    existing = byPhone;
+  }
+
+  if (existing) {
+    patientId = existing.id;
+    await supabase.from("patients").update(identityFields).eq("id", patientId);
   } else {
     const { data: newPatient, error: createPatientError } = await supabase
       .from("patients")
-      .insert({ clinic_id: clinic.id, name: name.trim(), phone })
+      .insert({ clinic_id: clinic.id, ...identityFields })
       .select("id")
       .single();
 
@@ -107,6 +217,29 @@ Deno.serve(async (req) => {
       });
     }
     patientId = newPatient.id;
+  }
+
+  // 2b. Optional records-storage consent (method='patient_app'). Insert only
+  //     if there isn't already an active grant, to avoid duplicate rows.
+  if (body.consent_records_storage === true) {
+    const { data: activeConsent } = await supabase
+      .from("patient_consent")
+      .select("id")
+      .eq("patient_id", patientId)
+      .eq("consent_type", "records_storage")
+      .eq("granted", true)
+      .is("revoked_at", null)
+      .maybeSingle();
+
+    if (!activeConsent) {
+      await supabase.from("patient_consent").insert({
+        clinic_id: clinic.id,
+        patient_id: patientId,
+        consent_type: "records_storage",
+        granted: true,
+        method: "patient_app",
+      });
+    }
   }
 
   const today = new Date().toISOString().split("T")[0];

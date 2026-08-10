@@ -204,4 +204,7 @@ export interface PatientSession {
 export interface PatientInfo {
   name: string;
   phone: string;
+  nationality?: string;
+  id_type?: "rsa_id" | "passport" | "asylum";
+  id_number?: string;
 }

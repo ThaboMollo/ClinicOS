@@ -43,6 +43,11 @@ export async function joinQueue(params: {
   clinic_slug: string;
   name: string;
   phone: string;
+  nationality: string;
+  id_type: "rsa_id" | "passport" | "asylum";
+  id_number: string;
+  dob?: string | null; // derived from an RSA ID on the client; re-derived server-side
+  consent_records_storage?: boolean; // optional records-storage consent (method='patient_app')
 }): Promise<JoinQueueResponse> {
   return callEdgeFunction<JoinQueueResponse>("join-queue", params);
 }
